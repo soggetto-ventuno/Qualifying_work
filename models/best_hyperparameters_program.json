@@ -1,0 +1,17 @@
+{
+  "embedding_dim": 10,
+  "num_units_1": 120,
+  "num_units_2": 70,
+  "num_dropout_1": 0.2,
+  "prog_units_1": 50,
+  "prog_units_2": 30,
+  "prog_dropout_1": 0.25,
+  "main_units_1": 120,
+  "main_units_2": 40,
+  "main_units_3": 40,
+  "main_units_4": 15,
+  "main_dropout_1": 0.45,
+  "main_dropout_2": 0.15,
+  "main_dropout_3": 0.2,
+  "learning_rate": 0.00038856960813245337
+}
