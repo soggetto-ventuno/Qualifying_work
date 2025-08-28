@@ -1,13 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
-import time
 import pickle
 import os
 import joblib
-import tensorflow as tf
 from tensorflow import keras
 
 # настройка страницы
@@ -18,6 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
 @st.cache_resource
 def load_program_model_components(models_dir='./models', data_dir='./prepared_data'):
     """
@@ -26,13 +24,14 @@ def load_program_model_components(models_dir='./models', data_dir='./prepared_da
     components = {}
     try:
         # Загрузка модели
-        model_path = os.path.join(models_dir, 'best_tuned_program_model.keras')
+#        model_path = os.path.join(models_dir, 'model_demand_program.keras')  #для неоптимизированной модели
+        model_path = os.path.join(models_dir, 'model_tuned_demand_program.keras')  #для оптимизированной модели
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Модель для программ не найдена: {model_path}")
         components['model'] = keras.models.load_model(model_path)
 
         # Загрузка скалера
-        scaler_path = os.path.join(models_dir, "scaler_program.pkl")
+        scaler_path = os.path.join(models_dir, "scaler_demand_program.pkl")
         if not os.path.exists(scaler_path):
             raise FileNotFoundError(f"Скалер для программ не найден: {scaler_path}")
         with open(scaler_path, 'rb') as f:
@@ -59,26 +58,24 @@ def load_prediction_components(models_dir='./models', data_dir='./prepared_data'
     components = {}
     try:
         # 1. Загрузка Keras модели
-        model_path = os.path.join(models_dir, 'university_demand_model.keras')
+        model_path = os.path.join(models_dir, 'model_demand_university.keras')
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Модель не найдена: {model_path}")
         components['model'] = keras.models.load_model(model_path) # Ключ: 'model'
 
         # 2. Загрузка скалера и списка признаков из PKL файла
-        data_path = os.path.join(data_dir, 'university_data.pkl')
+        data_path = os.path.join(models_dir, 'scaler_demand_university.pkl')
         if not os.path.exists(data_path):
-            raise FileNotFoundError(f"Файл данных 'university_data.pkl' не найден: {data_path}")
-
+            raise FileNotFoundError(f"Файл данных 'scaler_demand_university.pkl' не найден: {data_path}")
         with open(data_path, 'rb') as f:
-            data = pickle.load(f)
+            components['scaler'] = pickle.load(f)
 
-        # ПРЯМОЕ ПРИСВАИВАНИЕ КЛЮЧЕЙ
-        components['scaler'] = data.get('scaler') # Ключ: 'scaler'
-        components['feature_names'] = data.get('feature_names') # Ключ: 'feature_names'
+        feature_path = os.path.join(models_dir, 'features_demand_university.pkl')
+        if not os.path.exists(feature_path):
+            raise FileNotFoundError(f"Признаки не найдены: {feature_path}")
+        with open(feature_path, 'rb') as f:
+            components['feature_names'] = pickle.load(f)
 
-        # Проверка, что компоненты действительно загрузились
-        if components['scaler'] is None or components['feature_names'] is None:
-            raise ValueError("`scaler` или `feature_names` отсутствуют в файле `university_data.pkl`")
 
         st.success("Компоненты для прогнозирования успешно загружены.")
         return components
@@ -104,12 +101,8 @@ def prepare_program_features(common_inputs_from_widgets, university_id, universi
     # Эти значения должны быть типичными "сырыми" значениями
     default_features =  {
         "year": 2025,
-        "avg_ege_paid": 59.55295746666265,
         "ege_change_prev_year": 0.25466421841606207,
-        "enrolled_paid": 38.741970440384094,
         "cost_of_education_rub": 200.3236446825803,
-        "avg_ege_budget": 74.5354354173565,
-        "enrolled_budget": 53.28801059570753,
         "gdp_per_capita_usd": 9.858285722886126,
         "gdp_usd_billion": 1.7783387014237981,
         "gdp_rub_billion": 30.091806387525963,
@@ -123,9 +116,6 @@ def prepare_program_features(common_inputs_from_widgets, university_id, universi
         "gdp_deflator": 121.35555010384996,
         "population_million": 146.61882243159448,
         "unemployment_rate_percent": 4.536531109840162,
-        "total_enrolled": 92.02998103609163,
-        "enrolled_paid_university": 597.41904217212,
-        "all_enrolled_paid": 184876.60639354624,
         }
     # 2. Начинаем с значений по умолчанию
     features = default_features.copy()
@@ -158,7 +148,7 @@ def prepare_program_features(common_inputs_from_widgets, university_id, universi
     return features
 
 
-def prepare_features_for_prediction(features_dict, feature_names, scaler=None):
+def prepare_features_for_prediction(features_dict, deep_features, numeric_features, wide_feature, scaler=None):
     """
     Готовит признаки для ПЕРВОЙ модели (спрос на университет).
     """
@@ -169,12 +159,8 @@ def prepare_features_for_prediction(features_dict, feature_names, scaler=None):
     # Задаем значения по умолчанию для первой модели
     default_features = {
         "year": 2025,
-        "avg_ege_paid": 59.55295746666265,
         "ege_change_prev_year": 0.25466421841606207,
-        "enrolled_paid": 38.741970440384094,
         "cost_of_education_rub": 200.3236446825803,
-        "avg_ege_budget": 74.5354354173565,
-        "enrolled_budget": 53.28801059570753,
         "gdp_per_capita_usd": 9.858285722886126,
         "gdp_usd_billion": 1.7783387014237981,
         "gdp_rub_billion": 30.091806387525963,
@@ -188,33 +174,29 @@ def prepare_features_for_prediction(features_dict, feature_names, scaler=None):
         "gdp_deflator": 121.35555010384996,
         "population_million": 146.61882243159448,
         "unemployment_rate_percent": 4.536531109840162,
-        "total_enrolled": 92.02998103609163,
-        "enrolled_paid_university": 597.41904217212,
-        "all_enrolled_paid": 184876.60639354624,
     }
 
-    final_features = default_features.copy()
-    final_features.update(features_dict)
+    input_data = default_features.copy()
+    input_data.update(features_dict)
 
-    features_df = pd.DataFrame([final_features])
-    features_df = features_df[feature_names]
+    deep_df = pd.DataFrame([input_data])
 
-    try:
-        # У первой модели нет OHE, поэтому масштабируем все, кроме 'university'
-        cols_to_scale = [col for col in feature_names if col != 'university']
+    for feat in deep_features:
+        if feat not in deep_df.columns:
+            deep_df[feat] = 0
+        if deep_df[feat].dtype == 'bool':
+            deep_df[feat] = deep_df[feat].astype(int)
 
-        if not set(cols_to_scale).issubset(features_df.columns):
-            missing = set(cols_to_scale) - set(features_df.columns)
-            raise ValueError(f"В DataFrame отсутствуют столбцы, необходимые для скалера: {missing}")
+    deep_df[numeric_features] = scaler.transform(deep_df[numeric_features])
+    deep_input_values = deep_df[deep_features].values.astype('float32')
 
-        transformed_data = scaler.transform(features_df[cols_to_scale])
-        features_df[cols_to_scale] = transformed_data
+    wide_input_value = np.array([[input_data.get(wide_feature, 0)]])
 
-        return features_df
-
-    except Exception as e:
-        print(f"КРИТИЧЕСКАЯ ОШИБКА НА ЭТАПЕ МАСШТАБИРОВАНИЯ (модель университета): {e}")
-        return pd.DataFrame()
+    prediction_inputs = {
+        'deep_input': deep_input_values,
+        'wide_input': wide_input_value
+    }
+    return prediction_inputs
 
 def predict_program_demand_streamlit(user_inputs, program_components, is_debug_target):
     """
@@ -230,15 +212,15 @@ def predict_program_demand_streamlit(user_inputs, program_components, is_debug_t
     university_encoder = program_components['university_encoder']
 
     # 1. ПОДГОТОВКА ЧИСЛОВЫХ ПРИЗНАКОВ (numeric_input)
+
     numeric_features = [
-        'year', 'avg_ege_paid', 'ege_change_prev_year', 'enrolled_paid',
-        'cost_of_education_rub', 'avg_ege_budget', 'enrolled_budget',
+        'year', 'avg_ege_paid', 'ege_change_prev_year',
+        'cost_of_education_rub', 'avg_ege_budget',
         'gdp_per_capita_usd', 'gdp_usd_billion', 'gdp_rub_billion',
         'inflation_rate_percent', 'mrot_rub', 'avg_salary_rub',
         'real_salary_growth_percent', 'cpi_index', 'base_cpi',
         'base_inflation_percent', 'gdp_deflator', 'population_million',
-        'unemployment_rate_percent', 'total_enrolled', 'enrolled_paid_university',
-        'all_enrolled_paid'
+        'unemployment_rate_percent'
     ]
     df_numeric = pd.DataFrame([user_inputs])
     for col in numeric_features:
@@ -251,8 +233,7 @@ def predict_program_demand_streamlit(user_inputs, program_components, is_debug_t
     # 2. ПОДГОТОВКА ПРИЗНАКОВ ПРОГРАММ (program_groups_input)
 
     # gолучаем форму входов из самой модели. Это список кортежей.
-    # model.input_shape -> [(None, 23), (None, 67), (None, 1)]
-    # нужен второй элемент (индекс 1) и его вторая размерность (индекс 1).
+    # model.input_shape -> нужен второй элемент (индекс 1) и его вторая размерность (индекс 1).
     try:
         expected_program_features = model.input_shape[1][1]
     except (IndexError, TypeError):
@@ -261,10 +242,6 @@ def predict_program_demand_streamlit(user_inputs, program_components, is_debug_t
 
     X_programs = np.zeros((1, expected_program_features))
 
-    # получаем полный список имен столбцов для one-hot encoding программ
-    #program_feature_names = [f'program_group_{p}' for p in program_groups.get(user_inputs.get('university', 0), [])]
-
-    #selected_program_col = f"program_group_{user_inputs.get('selected_program', '')}"
 
     # Находим индекс выбранной программы в списке ВСЕХ возможных программ модели
     try:
@@ -315,7 +292,6 @@ def predict_program_demand_streamlit(user_inputs, program_components, is_debug_t
         return 0.0
 
 
-
 def predict_demand_share(user_inputs, components):
     """
     Предсказывает ДОЛЮ спроса, используя компоненты из ПРОСТОГО СЛОВАРЯ.
@@ -326,14 +302,20 @@ def predict_demand_share(user_inputs, components):
         st.write("Содержимое 'components':", components)  # Для отладки
         return 0.0
 
+
+
     # Прямое извлечение
     model = components['model']
     feature_names = components['feature_names']
+    d_features = feature_names['deep_features_list']
+    n_features = feature_names['numeric_features_deep']
+    w_feature = feature_names['wide_feature']
     scaler = components['scaler']
+
 
     try:
         # Подготовка полного набора признаков
-        features_prepared = prepare_features_for_prediction(user_inputs, feature_names, scaler)
+        features_prepared = prepare_features_for_prediction(user_inputs, d_features, n_features, w_feature, scaler)
 
         # Предсказание
         prediction = model.predict(features_prepared, verbose=0)[0, 0]
@@ -2318,6 +2300,8 @@ with st.sidebar:
     year = st.slider("Год прогноза:", 2024, 2030, 2026)
     predicted_cost_thousands = st.number_input("Прогнозная стоимость (тыс. руб./год):", min_value=100, max_value=800,
                                                value=250, step=10)
+    avg_ege_p = st.number_input("Средний балл ЕГЭ на платное направление:", min_value=50.00, max_value=100.00, value=70.00, step=0.10)
+    avg_ege_b = st.number_input("Средний балл ЕГЭ на бюджтное направление:", min_value=50.00, max_value=100.00, value=85.00, step=0.10)
 
     with st.expander("Экономические показатели"):
         mrot_thousands = st.number_input("МРОТ (тыс. руб.):", value=22.0, step=0.5)
@@ -2336,10 +2320,12 @@ with st.spinner('Выполняется комплексное прогнози�
     # --------------------------------------------------------------------------
     # 1. ПРОГНОЗ ПО ВСЕМ УНИВЕРСИТЕТАМ
     # --------------------------------------------------------------------------
+
     common_features = {
         "year": year, "cost_of_education_rub": predicted_cost_thousands,
         "mrot_rub": mrot_thousands, "avg_salary_rub": avg_salary_thousands,
         "cpi_index": cpi_index, "inflation_rate_percent": inflation_rate_percent,
+        "avg_ege_paid": avg_ege_p, "avg_ege_budget": avg_ege_b
     }
     st.write("Выполняется прогноз для каждого университета...")
     all_demands_dict = {}
