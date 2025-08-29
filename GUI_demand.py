@@ -2446,7 +2446,8 @@ with col2:
             yaxis_title="",
             height=350,
             margin=dict(l=10, r=10, t=30, b=10),
-            showlegend=False
+            showlegend=False,
+            xaxis=dict(showticklabels=False)
         )
         st.plotly_chart(fig_bar_uni, use_container_width=True)
     else:
